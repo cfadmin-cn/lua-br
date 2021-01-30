@@ -1,3 +1,5 @@
+#define LUA_LIB
+
 #include <core.h>
 #include <brotli/encode.h>
 #include <brotli/decode.h>
@@ -40,36 +42,23 @@ static int bruncompress(lua_State *L) {
   if (!input_buffer || input_size < 1)
     return luaL_error(L, "Invalid input_buffer.");
 
-  BrotliDecoderState *dec = BrotliDecoderCreateInstance(NULL, NULL, NULL);
-
-  luaL_Buffer B;
-  luaL_buffinit(L, &B);
-  size_t total_out = 0;
-  size_t in_size = input_size;
-  size_t outsize = input_size;
-  size_t out_size = input_size;
-  uint8_t* out_buffer = NULL;
+  size_t times = 5;
+  size_t out_size = input_size * 3;
+  size_t outsize = out_size;
   for(;;) {
-    out_buffer = xrealloc(out_buffer, out_size);
-    uint8_t* ptr = out_buffer + total_out;
-    BrotliDecoderResult code = BrotliDecoderDecompressStream(dec, &in_size, &input_buffer, &outsize, (uint8_t**)&ptr, &total_out);
-    // printf("code = %d, total = %zu, in_size = %zu, out_size = %zu\n", code, total_out, in_size, out_size);
-    /* 无效的解压字符串 */
-    if (BROTLI_DECODER_RESULT_ERROR == code){
-      BrotliDecoderDestroyInstance(dec);
-      xfree(out_buffer);
-      return luaL_error(L, "BrotliDecoderError: %s", BrotliDecoderErrorString(BrotliDecoderGetErrorCode(dec)));
-    }
-    /* 如果已经解压完毕 */
-    if (BROTLI_DECODER_RESULT_SUCCESS == code) {
-      luaL_addlstring(&B, (const char *)out_buffer, total_out);
-      luaL_pushresult(&B);
-      BrotliDecoderDestroyInstance(dec);
-      xfree(out_buffer);
+    /* 每次申请新内存块 */
+    uint8_t* out_buffer = lua_newuserdata(L, out_size);
+    /* 目前不考虑失败的情况, 失败五次直接当无法解压. */
+    if (BrotliDecoderDecompress(input_size, input_buffer, &outsize, out_buffer) == BROTLI_DECODER_RESULT_SUCCESS) {
+      lua_pushlstring(L, (const char *)out_buffer, outsize);
       break;
     }
-    outsize = input_size;
-    out_size = total_out + input_size;
+    if (!times)
+      return 0;
+    /* 每次尝试按照最好的方式跳转内存块申请大小 */
+    lua_settop(L, lua_gettop(L) - 1);
+    outsize = out_size = out_size * 3;
+    times--;
   }
   return 1;
 }
