@@ -4,8 +4,24 @@
 #include <brotli/encode.h>
 #include <brotli/decode.h>
 
+#ifndef BROTLI_MIN_QUALITY
+  #define BROTLI_MIN_QUALITY (0)
+#endif
+
+#ifndef BROTLI_MAX_QUALITY
+  #define BROTLI_MAX_QUALITY (11)
+#endif
+
 #ifndef BROTLI_DEFAULT_QUALITY
   #define BROTLI_DEFAULT_QUALITY (11)
+#endif
+
+#ifndef BROTLI_MIN_WINDOW_BITS
+  #define BROTLI_MIN_WINDOW_BITS (10)
+#endif
+
+#ifndef BROTLI_MAX_WINDOW_BITS
+  #define BROTLI_MAX_WINDOW_BITS (24)
 #endif
 
 #ifndef BROTLI_DEFAULT_WINDOW
@@ -15,6 +31,9 @@
 #ifndef BROTLI_DEFAULT_MODE
   #define BROTLI_DEFAULT_MODE (0)
 #endif
+
+static int br_default_quality = 6;
+static int br_default_window = 22;
 
 /* 压缩 */
 static int brcompress(lua_State *L) {
@@ -27,7 +46,7 @@ static int brcompress(lua_State *L) {
   size_t out_size = BrotliEncoderMaxCompressedSize(input_size);
   uint8_t* out_buffer = (uint8_t*)lua_newuserdata(L, out_size);
 
-  if (BrotliEncoderCompress(BROTLI_DEFAULT_QUALITY, BROTLI_DEFAULT_WINDOW, BROTLI_DEFAULT_MODE, input_size, input_buffer, &out_size, out_buffer) == BROTLI_FALSE)
+  if (BrotliEncoderCompress(br_default_quality, br_default_window, BROTLI_DEFAULT_MODE, input_size, input_buffer, &out_size, out_buffer) == BROTLI_FALSE)
     return luaL_error(L, "brotli compression error or output buffer is too small.");
   
   /* 将压缩好的内容返回给调用者 */
@@ -63,11 +82,31 @@ static int bruncompress(lua_State *L) {
   return 1;
 }
 
+// 设置window大小
+static int setbrwindow(lua_State *L) {
+  lua_Integer window = luaL_checkinteger(L, 1);
+  if (window < BROTLI_MIN_WINDOW_BITS || window > BROTLI_MAX_WINDOW_BITS)
+    return 0;
+  br_default_window = window;
+  return 1;
+}
+
+// 设置quality大小
+static int setbrquality(lua_State *L) {
+  lua_Integer quality = luaL_checkinteger(L, 1);
+  if (quality < BROTLI_MIN_QUALITY || quality > BROTLI_MAX_QUALITY)
+    return 0;
+  br_default_quality = quality;
+  return 1;
+}
+
 LUAMOD_API int luaopen_lbr(lua_State *L) {
   luaL_checkversion(L);
   luaL_Reg brotli_libs[] = {
     { "compress", brcompress },
     { "uncompress", bruncompress },
+    { "set_window", setbrwindow },
+    { "set_quality", setbrquality },
     {NULL, NULL},
   };
   luaL_newlib(L, brotli_libs);
