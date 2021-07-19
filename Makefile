@@ -12,7 +12,7 @@ MV = mv
 
 INCLUDES += -I../../src -I../../../src -I/usr/local/include
 LIBS += -L../ -L../../ -L../../../ -L/usr/local/lib
-CFLAGS += -g0 -O3 -shared -fPIC
+CFLAGS += -O3 -shared -fPIC
 MICRO += -Wl,-rpath,. -Wl,-rpath,.. -Wl,-rpath,/usr/local/lib -Wl,-rpath,/usr/local/lib64
 DLL += -lcore -lbrotlienc -lbrotlidec
 
