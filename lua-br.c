@@ -1,39 +1,13 @@
-// #define LUA_LIB
+#define LUA_LIB
 
 #include <core.h>
 #include <brotli/encode.h>
 #include <brotli/decode.h>
 
-#ifndef BROTLI_MIN_QUALITY
-  #define BROTLI_MIN_QUALITY (0)
-#endif
-
-#ifndef BROTLI_MAX_QUALITY
-  #define BROTLI_MAX_QUALITY (11)
-#endif
-
-#ifndef BROTLI_DEFAULT_QUALITY
-  #define BROTLI_DEFAULT_QUALITY (11)
-#endif
-
-#ifndef BROTLI_MIN_WINDOW_BITS
-  #define BROTLI_MIN_WINDOW_BITS (10)
-#endif
-
-#ifndef BROTLI_MAX_WINDOW_BITS
-  #define BROTLI_MAX_WINDOW_BITS (24)
-#endif
-
-#ifndef BROTLI_DEFAULT_WINDOW
-  #define BROTLI_DEFAULT_WINDOW (22)
-#endif
-
-#ifndef BROTLI_DEFAULT_MODE
-  #define BROTLI_DEFAULT_MODE (0)
-#endif
-
-static int br_default_quality = 6;
-static int br_default_window = 22;
+static int br_block           = 512;
+static int br_default_mode    = BROTLI_DEFAULT_MODE;
+static int br_default_quality = BROTLI_DEFAULT_QUALITY;
+static int br_default_window  = BROTLI_DEFAULT_WINDOW;
 
 /* 压缩 */
 static int brcompress(lua_State *L) {
@@ -46,7 +20,7 @@ static int brcompress(lua_State *L) {
   size_t out_size = BrotliEncoderMaxCompressedSize(input_size);
   uint8_t* out_buffer = (uint8_t*)lua_newuserdata(L, out_size);
 
-  if (BrotliEncoderCompress(br_default_quality, br_default_window, BROTLI_DEFAULT_MODE, input_size, input_buffer, &out_size, out_buffer) == BROTLI_FALSE)
+  if (BrotliEncoderCompress(br_default_quality, br_default_window, br_default_mode, input_size, input_buffer, &out_size, out_buffer) == BROTLI_FALSE)
     return luaL_error(L, "[Brotli ERROR]: output buffer too small.");
   
   /* 将压缩好的内容返回给调用者 */
@@ -61,27 +35,41 @@ static int bruncompress(lua_State *L) {
   if (!input_buffer || input_size < 1)
     return luaL_error(L, "[Brotli ERROR]: Invalid uncompress buffer.");
 
-  size_t times;
-  size_t out_size = input_size * 4;
-  size_t outsize = out_size;
+  BrotliDecoderState *state = BrotliDecoderCreateInstance(NULL, NULL, NULL);
 
-  for (times = 1; times <= 10; times++) {
-    uint8_t* outbuffer = lua_newuserdata(L, out_size);
-    if (BrotliDecoderDecompress(input_size, input_buffer, &outsize, outbuffer) == BROTLI_DECODER_RESULT_SUCCESS) {
-      lua_pushlstring(L, (const char *)outbuffer, outsize);
-      return 1;
+  luaL_Buffer B;
+  luaL_buffinit(L, &B);
+
+  size_t out_size = br_block;
+  uint8_t *buffer = alloca(br_block);
+  uint8_t *out = buffer;
+
+  while (1)
+  {
+    switch (BrotliDecoderDecompressStream(state, &input_size, &input_buffer, &out_size, &out, NULL))
+    {
+      case BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT: /* 输出缓冲区内存不足 */
+        luaL_addlstring(&B, buffer, br_block - out_size);
+        out_size = br_block;
+        out = buffer;
+        break;
+      case BROTLI_DECODER_RESULT_SUCCESS:  /* 解码完成 */
+        luaL_addlstring(&B, buffer, br_block - out_size);
+        luaL_pushresult(&B);
+        BrotliDecoderDestroyInstance(state);
+        return 1;
+      default:
+        lua_pushboolean(L, 0);
+        lua_pushfstring(L, "[Brotli ERROR]: corrupted input buffer or memory not enough.");
+        BrotliDecoderDestroyInstance(state);
+        return 2;
     }
-    lua_pop(L, 1);
-    outsize = out_size *= 4;
   }
-
-  lua_pushboolean(L, 0);
-  lua_pushfstring(L, "[Brotli ERROR]: uncompress memory was not enough.");
-  return 2;
+  /* end */
 }
 
 // 设置window大小
-static int setbrwindow(lua_State *L) {
+static int set_window(lua_State *L) {
   lua_Integer window = luaL_checkinteger(L, 1);
   if (window < BROTLI_MIN_WINDOW_BITS || window > BROTLI_MAX_WINDOW_BITS)
     return 0;
@@ -90,7 +78,7 @@ static int setbrwindow(lua_State *L) {
 }
 
 // 设置quality大小
-static int setbrquality(lua_State *L) {
+static int set_quality(lua_State *L) {
   lua_Integer quality = luaL_checkinteger(L, 1);
   if (quality < BROTLI_MIN_QUALITY || quality > BROTLI_MAX_QUALITY)
     return 0;
@@ -98,13 +86,33 @@ static int setbrquality(lua_State *L) {
   return 1;
 }
 
+// 设置压缩mode
+static int set_mode(lua_State *L) {
+  lua_Integer mode = luaL_checkinteger(L, 1);
+  if (mode < 1 || mode > 2)
+    return 0;
+  br_default_mode = mode;
+  return 1;
+}
+
+// 设置每次解压块大小
+static int set_block(lua_State *L) {
+  lua_Integer block = luaL_checkinteger(L, 1);
+  if (block < 1 || block > 65535)
+    return 0;
+  br_block = block;
+  return 1;
+}
+
 LUAMOD_API int luaopen_lbr(lua_State *L) {
   luaL_checkversion(L);
   luaL_Reg brotli_libs[] = {
-    { "compress", brcompress },
-    { "uncompress", bruncompress },
-    { "set_window", setbrwindow },
-    { "set_quality", setbrquality },
+    { "compress",     brcompress },
+    { "uncompress",   bruncompress },
+    { "set_window",   set_window },
+    { "set_quality",  set_quality },
+    { "set_block",    set_block },
+    { "set_mode",     set_mode },
     {NULL, NULL},
   };
   luaL_newlib(L, brotli_libs);
