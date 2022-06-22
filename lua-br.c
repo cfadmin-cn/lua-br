@@ -49,12 +49,12 @@ static int bruncompress(lua_State *L) {
     switch (BrotliDecoderDecompressStream(state, &input_size, &input_buffer, &out_size, &out, NULL))
     {
       case BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT: /* 输出缓冲区内存不足 */
-        luaL_addlstring(&B, buffer, br_block - out_size);
+        luaL_addlstring(&B, (const char*)buffer, br_block - out_size);
         out_size = br_block;
         out = buffer;
         break;
       case BROTLI_DECODER_RESULT_SUCCESS:  /* 解码完成 */
-        luaL_addlstring(&B, buffer, br_block - out_size);
+        luaL_addlstring(&B, (const char*)buffer, br_block - out_size);
         luaL_pushresult(&B);
         BrotliDecoderDestroyInstance(state);
         return 1;
